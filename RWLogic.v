@@ -16,8 +16,8 @@ output shouldInitiateFlags // flag to indicate if ICWFlags should be reset
 );
 
 wire chipSelected = ~CS;
-wire writeSignal = ~WR;
-wire readSignal = ~RD;
+wire writeSignal = ~RD;
+wire readSignal = ~WR;
 
 // initialize registers ICWFlags to 0
 assign shouldInitiateFlags = ~A0 && globalBus[4] && chipSelected && readSignal;
@@ -110,7 +110,7 @@ RWLogic rwLogic(
 
 initial begin
     CS = 1'b0;
-    RD = 1'b0;
+    WR = 1'b0;
     globalBus <= 8'b00010001;
     A0 <= 1'b0;
     #10
@@ -173,7 +173,7 @@ RWLogic rwLogic(
 
 initial begin
     CS = 1'b0;
-    RD = 1'b0;
+    WR = 1'b0;
     globalBus <= 8'b00010000;
     A0 <= 1'b0;
     #10

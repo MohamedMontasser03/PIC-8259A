@@ -14,9 +14,9 @@ module PIC8259A(
 );
 
 reg [7:0] DBusReg;
-assign DBus = ~WR && ~CS ? DBusReg : 8'bz;
+assign DBus = ~RD && ~CS ? DBusReg : 8'bz;
 
-// internal registers
+// internal signals
 wire [7:0] ICW1;
 wire [7:0] ICW2;
 wire [7:0] ICW3;
@@ -27,10 +27,11 @@ wire [7:0] OCW3;
 wire shouldInitiateFlags;
 wire [2:0] highestPriority;
 reg currentPulse;
+reg [1:0] shouldSendStatus; // 0: no, 1: ISR, 2: IRR, 3: IMR
 wire [7:0] irr;
 
 wire LTIM = ICW1[3];
-wire writeEnabled = ~WR && ~CS;
+wire writeEnabled = ~RD && ~CS;
 
 always @(shouldInitiateFlags) begin
     if(shouldInitiateFlags) begin
@@ -80,6 +81,37 @@ ISR isr(
     .currentPulse(currentPulse),
     .currentAddress(ISROutput)
 );
+
+////////////////////// Handling Read Status //////////////////////
+
+always @(OCW3) begin
+    if(OCW3[0] && OCW3[1]) begin
+        shouldSendStatus <= 2'b01;
+    end else if(~OCW3[0] && OCW3[1]) begin
+        shouldSendStatus <= 2'b10;
+    end
+end
+
+// send status
+always @(negedge RD) begin
+    if(shouldSendStatus === 2'b01 && writeEnabled) begin
+        case(ISROutput[2:0])
+        // handling Difference in IS register between this implementation and the real PIC8259A
+            3'b000: DBusReg <= 8'b00000000;
+            3'b001: DBusReg <= 8'b00000010;
+            3'b010: DBusReg <= 8'b00000100;
+            3'b011: DBusReg <= 8'b00001000;
+            3'b100: DBusReg <= 8'b00010000;
+            3'b101: DBusReg <= 8'b00100000;
+            3'b110: DBusReg <= 8'b01000000;
+            3'b111: DBusReg <= 8'b10000000;
+        endcase
+    end else if(shouldSendStatus === 2'b10) begin
+        DBusReg <= irr;
+    end
+end
+
+////////////////////// Handling Interrupts //////////////////////
 
 // set interrupt output
 wire interruptExists = |(irr & ~OCW1);
@@ -146,7 +178,7 @@ PIC8259A pic8259A(
 
 initial begin
     CS = 1'b0;
-    RD = 1'b0;
+    WR = 1'b0;
     // ICW1
     globalBus <= 8'b00010011;
     A0 <= 1'b0;
@@ -173,7 +205,7 @@ initial begin
     globalBus <= 8'b00001000; // last two bits are for read status
     #1;
     CS <= 1'b1;
-    RD <= 1'b1;
+    WR <= 1'b1;
     globalBus <= 8'bzzzzzzzz;
 
     // trigger interrupt
@@ -182,12 +214,12 @@ initial begin
     #50;
     // reset mask to test programmability
     CS <= 1'b0;
-    RD <= 1'b0;
+    WR <= 1'b0;
     A0 <= 1'b1;
     globalBus <= 8'b00000000;
     #1;
     CS <= 1'b1;
-    RD <= 1'b1;
+    WR <= 1'b1;
     globalBus <= 8'bzzzzzzzz;
 end
 
@@ -200,11 +232,11 @@ always @(posedge INT) begin
     #5;
     // acknowledge interrupt pulse 2
     INTA <= 1'b0;
-    WR <= 1'b0;
+    RD <= 1'b0;
     CS <= 1'b0;
     #5;
     INTA <= 1'b1;
-    WR <= 1'b1;
+    RD <= 1'b1;
     CS <= 1'b1;
 end
 endmodule
@@ -239,7 +271,7 @@ PIC8259A pic8259A(
 
 initial begin
     CS = 1'b0;
-    RD = 1'b0;
+    WR = 1'b0;
     // ICW1
     globalBus <= 8'b00011011;
     A0 <= 1'b0;
@@ -266,7 +298,7 @@ initial begin
     globalBus <= 8'b00001000; // last two bits are for read status
     #1;
     CS <= 1'b1;
-    RD <= 1'b1;
+    WR <= 1'b1;
     globalBus <= 8'bzzzzzzzz;
 
     // trigger interrupt
@@ -283,12 +315,12 @@ always @(posedge INT) begin
     #5;
     // acknowledge interrupt pulse 2
     INTA <= 1'b0;
-    WR <= 1'b0;
+    RD <= 1'b0;
     CS <= 1'b0;
     #5;
     IRBus <= 8'b00000000; // reset interrupt since it is level triggered
     INTA <= 1'b1;
-    WR <= 1'b1;
+    RD <= 1'b1;
     CS <= 1'b1;
 end
 endmodule
@@ -323,7 +355,7 @@ PIC8259A pic8259A(
 
 initial begin
     CS = 1'b0;
-    RD = 1'b0;
+    WR = 1'b0;
     // ICW1
     globalBus <= 8'b00011011;
     A0 <= 1'b0;
@@ -350,7 +382,7 @@ initial begin
     globalBus <= 8'b00001000; // last two bits are for read status
     #1;
     CS <= 1'b1;
-    RD <= 1'b1;
+    WR <= 1'b1;
     globalBus <= 8'bzzzzzzzz;
 
     // trigger interrupt
@@ -368,12 +400,124 @@ always @(posedge INT) begin
     #5;
     // acknowledge interrupt pulse 2
     INTA <= 1'b0;
-    WR <= 1'b0;
+    RD <= 1'b0;
     CS <= 1'b0;
     #5;
     INTA <= 1'b1;
-    WR <= 1'b1;
+    RD <= 1'b1;
     CS <= 1'b1;
 end
 endmodule
 
+// test read status
+module PIC8259A_tb_read_status;
+reg [7:0] globalBus;
+wire [7:0] globalBusWire;
+assign globalBusWire = globalBus;
+
+reg [7:0] IRBus = 8'b00000000;
+reg A0;
+reg CS = 1'b1;
+reg WR = 1'b1;
+reg RD = 1'b1;
+reg INTA = 1'b1;
+wire INT;
+
+PIC8259A pic8259A(
+    .VCC(1'b1),
+    .A0(A0),
+    .INTA(INTA),
+    .IRBus(IRBus),
+    .INT(INT),
+    .SPEN(1'b1),
+    .CS(CS),
+    .WR(WR),
+    .RD(RD),
+    .DBus(globalBusWire),
+    .GND(1'b0)
+);
+
+initial begin
+    CS = 1'b0;
+    WR = 1'b0;
+    // ICW1
+    globalBus <= 8'b00010011;
+    A0 <= 1'b0;
+    #10
+    A0 <= 1'b1;
+    // ICW2
+    globalBus <= 8'b11011000;
+    #10;
+    A0 <= 1'b1;
+    // ICW4
+    globalBus <= 8'b00000011;
+    #10;
+
+    // OCW1
+    A0 <= 1'b1;
+    globalBus <= 8'b00000001; // bit 0 is masked
+    #10;
+    // OCW2
+    A0 <= 1'b0;
+    globalBus <= 8'b01000000;
+    #10;
+    // OCW3
+    A0 <= 1'b0;
+    globalBus <= 8'b00001000; // last two bits are for read status
+    #1;
+    CS <= 1'b1;
+    WR <= 1'b1;
+    globalBus <= 8'bzzzzzzzz;
+
+    // trigger interrupt
+    #10;
+    IRBus <= 8'b10001001;
+
+    // send OCW3 to read status
+    #2;
+    CS <= 1'b0;
+    WR <= 1'b0;
+    A0 <= 1'b0;
+    globalBus <= 8'b00001010; // Read IRR
+    #1;
+    RD <= 1'b0;
+    WR <= 1'b1;
+    globalBus <= 8'bzzzzzzzz;
+    #1;
+    RD <= 1'b1;
+    CS <= 1'b1;
+    WR <= 1'b1;
+end
+
+always @(posedge INT) begin
+    #5;
+    // acknowledge interrupt pulse 1
+    INTA <= 1'b0;
+    #5;
+    INTA <= 1'b1;
+    #5;
+    // send OCW3 to read status
+    #2;
+    CS <= 1'b0;
+    WR <= 1'b0;
+    A0 <= 1'b0;
+    globalBus <= 8'b00001011; // Read ISR
+    #1;
+    RD <= 1'b0;
+    WR <= 1'b1;
+    globalBus <= 8'bzzzzzzzz;
+    #1;
+    WR <= 1'b1;
+    CS <= 1'b1;
+    RD <= 1'b1;
+    #5;
+    // acknowledge interrupt pulse 2
+    INTA <= 1'b0;
+    RD <= 1'b0;
+    CS <= 1'b0;
+    #5;
+    INTA <= 1'b1;
+    RD <= 1'b1;
+    CS <= 1'b1;
+end
+endmodule
