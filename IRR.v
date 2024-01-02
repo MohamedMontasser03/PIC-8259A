@@ -52,7 +52,6 @@ module IRR_tb;
     reg INTA;
     reg currentPulse;
     wire [7:0] irr;
-    wire interruptExists;
 
     // Instantiate the IRR module
     IRR dut (
@@ -62,18 +61,17 @@ module IRR_tb;
         .highestPriority(highestPriority),
         .INTA(INTA),
         .currentPulse(currentPulse),
-        .interruptExists(interruptExists),
         .reset(reset)
     );
 
     // Stimulus and test cases
     initial begin
+        reset = 1;
+        #1
         reset = 0;
         INTA = 1;
         currentPulse = 1;
         highestPriority = 3'b101;
-        #1
-        reset = 1;
         #1
         // Edge-triggered
         LTIM = 0;
