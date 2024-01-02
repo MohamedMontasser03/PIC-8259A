@@ -5,10 +5,8 @@ module IRR (
     input [2:0] highestPriority,      // Input priority signal
     input INTA,                       // Input active low signal
     input currentPulse,               // Input signal indicating current pulse
-    output reg [7:0] irr, // Interrupt request register
-    output interruptExists // Interrupt signal - 1 if any bit in irr is 1
+    output reg [7:0] irr // Interrupt request register
 );
-    assign interruptExists = |irr;
 
     // Edge-triggered
     // only update the bit that had the edge
@@ -31,13 +29,15 @@ module IRR (
         end
     end
 
-    always @(posedge reset) begin
-        irr <= 8'b00000000;
+    always @(reset) begin
+        if (reset) begin
+            irr <= 8'b00000000;
+        end
     end
 
     // reset irr when INTA is high -> low on the second pulse
-    always @(negedge INTA) begin
-        if (currentPulse === 1) begin
+    always @(posedge INTA) begin
+        if (currentPulse === 0 && ~LTIM) begin
             irr[highestPriority] <= 1'b0;
         end
     end
