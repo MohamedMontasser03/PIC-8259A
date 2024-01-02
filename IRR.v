@@ -2,6 +2,9 @@ module IRR (
     input reset, // Resets signal to initial state
     input LTIM, // For determining whether it will be edge or level triggered
     input [7:0] IRBus, // Vectorized input for interrupt signals
+    input [2:0] highestPriority,      // Input priority signal
+    input INTA,                       // Input active low signal
+    input currentPulse,               // Input signal indicating current pulse
     output reg [7:0] irr, // Interrupt request register
     output interruptExists // Interrupt signal - 1 if any bit in irr is 1
 );
@@ -31,6 +34,13 @@ module IRR (
     always @(posedge reset) begin
         irr <= 8'b00000000;
     end
+
+    // reset irr when INTA is high -> low on the second pulse
+    always @(negedge INTA) begin
+        if (currentPulse === 1) begin
+            irr[highestPriority] <= 1'b0;
+        end
+    end
 endmodule
 
 // test both edge and level triggered
@@ -38,6 +48,9 @@ module IRR_tb;
     reg LTIM;
     reg [7:0] IRBus;
     reg reset;
+    reg [2:0] highestPriority;
+    reg INTA;
+    reg currentPulse;
     wire [7:0] irr;
     wire interruptExists;
 
@@ -46,6 +59,9 @@ module IRR_tb;
         .LTIM(LTIM),
         .IRBus(IRBus),
         .irr(irr),
+        .highestPriority(highestPriority),
+        .INTA(INTA),
+        .currentPulse(currentPulse),
         .interruptExists(interruptExists),
         .reset(reset)
     );
@@ -53,6 +69,9 @@ module IRR_tb;
     // Stimulus and test cases
     initial begin
         reset = 0;
+        INTA = 1;
+        currentPulse = 1;
+        highestPriority = 3'b101;
         #1
         reset = 1;
         #1
@@ -69,6 +88,8 @@ module IRR_tb;
         IRBus = 8'b00010000;
         #10
         IRBus = 8'b00100000;
+        #5
+        INTA = 0;
         #10
         IRBus = 8'b11000001;
         #10
